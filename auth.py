@@ -3,10 +3,6 @@ import streamlit_authenticator as stauth
 
 
 def check_authentication():
-    """
-    Maneja el flujo de inicio de sesión de la aplicación.
-    Retorna True si el usuario está autenticado, de lo contrario muestra el formulario.
-    """
     # Cargar la configuración desde st.secrets
     credentials = dict(st.secrets["credentials"])
     cookie_config = dict(st.secrets["cookie"])
@@ -19,8 +15,12 @@ def check_authentication():
         cookie_config["expiry_days"],
     )
 
-    # Renderizar el formulario de login en la pantalla
-    name, authentication_status, username = authenticator.login(location="main")
+    # El método login() ahora no devuelve valores,
+    # sino que actualiza st.session_state directamente
+    authenticator.login()
+
+    # Recuperamos el estado desde el session_state
+    authentication_status = st.session_state.get("authentication_status")
 
     if authentication_status == False:
         st.error("Usuario o contraseña incorrectos")
@@ -29,6 +29,6 @@ def check_authentication():
         st.warning("Por favor, ingresa tu usuario y contraseña")
         return False
 
-    # Guardar el autenticador en el estado de la sesión para poder usar el logout después
+    # Guardar el autenticador en el estado de la sesión para logout
     st.session_state["authenticator"] = authenticator
     return True
