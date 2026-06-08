@@ -1,0 +1,5 @@
+streamlit
+streamlit-authenticator
+pymongo[srv]
+pandas
+plotly
