@@ -56,7 +56,6 @@ with tab2:
                 "balance": float(balance),
                 "currency": "COP",
                 "last_updated": datetime.utcnow(),
-                "inserted_by": st.session_state["authenticator"].username,
             }
             insert_account(account_data)
             st.success(f"Producto '{name}' anclado al modelo con éxito.")

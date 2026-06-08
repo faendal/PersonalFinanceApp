@@ -66,9 +66,6 @@ with tab1:
                 "counterparty": counterparty,
                 "description": description,
                 "is_reviewed": True,  # Las entradas manuales se asumen revisadas
-                "inserted_by": st.session_state[
-                    "authenticator"
-                ].username,  # Traza de auditoría
             }
 
             # Inyección a MongoDB Atlas
