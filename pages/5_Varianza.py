@@ -1,150 +1,131 @@
 import streamlit as st
-from datetime import datetime
+import pandas as pd
 import plotly.graph_objects as go
-from database import get_transactions_df
+from datetime import datetime
+from database import get_transactions_df, get_categories_dict
 
-st.set_page_config(page_title="Análisis de Varianza", layout="wide")
+# Configuración básica de la página
+st.set_page_config(page_title="Control de Gastos", layout="wide")
 
-st.title("Análisis de Varianza y Adherencia")
+st.title("¿Cómo voy con mis gastos?")
 st.markdown(
-    "Monitoreo en tiempo real de la desviación entre el gasto empírico del ciclo actual y la línea base histórica consolidada."
+    "Compara lo que has gastado en el mes actual con el promedio de lo que normalmente gastas según tu historial."
 )
 
+# 1. Traer datos de la base de datos
 df_trans = get_transactions_df()
+categorias_dict = get_categories_dict()
+lista_categorias = list(categorias_dict.keys())
 
 if not df_trans.empty:
-    # 1. Preparación de Datos Temporales
     today = datetime.today()
-    current_month = today.month
-    current_year = today.year
+    mes_actual = today.month
+    anio_actual = today.year
 
-    # Filtramos gastos excluyendo transferencias
-    df_expenses = df_trans[df_trans["type"] == "expense"].copy()
-    df_expenses["month"] = df_expenses["date"].dt.month
-    df_expenses["year"] = df_expenses["date"].dt.year
+    # Filtramos únicamente los gastos (registrados como 'expense' internamente)
+    df_gastos = df_trans[df_trans["type"] == "expense"].copy()
 
-    # 2. Separar el ciclo actual del historial (Línea Base)
-    df_current = df_expenses[
-        (df_expenses["month"] == current_month)
-        & (df_expenses["year"] == current_year)
-    ]
-    df_historical = df_expenses[
-        ~(
-            (df_expenses["month"] == current_month)
-            & (df_expenses["year"] == current_year)
+    if not df_gastos.empty:
+        df_gastos["mes"] = df_gastos["date"].dt.month
+        df_gastos["anio"] = df_gastos["date"].dt.year
+
+        # 2. Separar el mes actual de los meses anteriores
+        df_mes_actual = df_gastos[(df_gastos["mes"] == mes_actual) & (df_gastos["anio"] == anio_actual)]
+        df_historial = df_gastos[~((df_gastos["mes"] == mes_actual) & (df_gastos["anio"] == anio_actual))]
+
+        # 3. Calcular el gasto promedio histórico por categoría
+        gastos_habituales = {cat: 0.0 for cat in lista_categorias}
+        if not df_historial.empty:
+            hist_agrupado = df_historial.groupby(["anio", "mes", "category"])["amount"].sum().reset_index()
+            promedios_historicos = hist_agrupado.groupby("category")["amount"].mean().to_dict()
+            for cat, valor in promedios_historicos.items():
+                if cat in gastos_habituales:
+                    gastos_habituales[cat] = valor
+
+        # 4. Calcular el gasto del mes actual por categoría
+        gastos_actuales = {cat: 0.0 for cat in lista_categorias}
+        if not df_mes_actual.empty:
+            actual_agrupado = df_mes_actual.groupby("category")["amount"].sum().to_dict()
+            for cat, valor in actual_agrupado.items():
+                if cat in gastos_actuales:
+                    gastos_actuales[cat] = valor
+
+        st.subheader(f"Estado de mis gastos en {today.strftime('%B %Y')}")
+
+        # 5. Crear el gráfico de barras comparativo (Dinámico)
+        categorias_con_datos = sorted(lista_categorias)
+        valores_habituales = [gastos_habituales[cat] for cat in categorias_con_datos]
+        valores_actuales = [gastos_actuales[cat] for cat in categorias_con_datos]
+
+        # Definir colores de las barras de este mes (Verde si gastó menos o igual, Rojo si se pasó)
+        colores_actuales = [
+            "#2ca02c" if gastos_actuales[cat] <= gastos_habituales[cat] else "#d62728"
+            for cat in categorias_con_datos
+        ]
+
+        fig = go.Figure()
+
+        # Barra de Gasto Habitual
+        fig.add_trace(go.Bar(
+            name="Gasto Habitual (Promedio)",
+            x=categorias_con_datos,
+            y=valores_habituales,
+            marker_color="#cbd5e1" # Gris claro elegante
+        ))
+
+        # Barra de Gasto de este Mes
+        fig.add_trace(go.Bar(
+            name="Gasto de este Mes",
+            x=categorias_con_datos,
+            y=valores_actuales,
+            marker_color=colores_actuales
+        ))
+
+        fig.update_layout(
+            barmode="group",
+            title="Comparativa de Gastos",
+            xaxis_title="Categorías",
+            yaxis_title="Dinero Gastado ($)",
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
         )
-    ]
 
-    # 3. Calcular Líneas Base Estructurales (Promedio Histórico)
-    baselines = {}
-    if not df_historical.empty:
-        hist_grouped = (
-            df_historical.groupby(["year", "month", "category"])["amount"]
-            .sum()
-            .reset_index()
-        )
-        baselines = hist_grouped.groupby("category")["amount"].mean().to_dict()
+        st.plotly_chart(fig, use_container_width=True)
 
-    # Gasto actual por categoría
-    current_spending = df_current.groupby("category")["amount"].sum().to_dict()
+        st.markdown("---")
 
-    # Consolidar categorías existentes
-    all_categories = set(list(baselines.keys()) + list(current_spending.keys()))
+        # 6. Diagnóstico y Alertas sencillas
+        st.subheader("Diagnóstico de la situación")
 
-    st.subheader(f"Estado de Adherencia - Ciclo Actual ({today.strftime('%B %Y')})")
+        col1, col2 = st.columns(2)
+        alertas = []
 
-    # 4. Motor de Visualización de Varianza (Bullet Charts)
-    fig = go.Figure()
+        # Detectar en qué categorías se pasó del promedio
+        for cat in categorias_con_datos:
+            if gastos_actuales[cat] > gastos_habituales[cat]:
+                diferencia = gastos_actuales[cat] - gastos_habituales[cat]
+                alertas.append({"categoria": cat, "diferencia": diferencia})
 
-    y_pos = 0
-    alerts = []
+        with col1:
+            st.markdown("#### **Alertas de Gastos**")
+            if alertas:
+                st.error("Te has pasado de tu promedio habitual en las siguientes categorías:")
+                for al in alertas:
+                    st.warning(f"• **{al['categoria']}**: Has gastado **$ {al['diferencia']:,.0f} más** de lo normal.")
+            else:
+                st.success("¡Felicitaciones! Estás bajo control. En ninguna categoría has gastado más de lo habitual.")
 
-    for cat in sorted(list(all_categories)):
-        baseline_val = baselines.get(cat, 0.1)  # Evitar división por cero
-        current_val = current_spending.get(cat, 0.0)
-
-        # Determinar color según adherencia
-        color = "#2ca02c" if current_val <= baseline_val else "#d62728"
-
-        # Registrar alertas estructurales
-        if current_val > baseline_val:
-            alerts.append(
-                {
-                    "Categoria": cat,
-                    "Desviacion": current_val - baseline_val,
-                    "Porcentaje": (current_val / baseline_val) * 100,
-                }
-            )
-
-        fig.add_trace(
-            go.Indicator(
-                mode="number+gauge+delta",
-                value=current_val,
-                delta={
-                    "reference": baseline_val,
-                    "position": "top",
-                    "valueformat": "$,.0f",
-                },
-                domain={"x": [0.2, 1], "y": [y_pos, y_pos + 0.15]},
-                title={"text": cat, "font": {"size": 16}},
-                gauge={
-                    "shape": "bullet",
-                    "axis": {"range": [None, max(baseline_val, current_val) * 1.2]},
-                    "threshold": {
-                        "line": {"color": "white", "width": 2},
-                        "thickness": 0.75,
-                        "value": baseline_val,
-                    },
-                    "bar": {"color": color},
-                },
-            )
-        )
-        y_pos += 0.25
-
-    fig.update_layout(
-        height=150 + (len(all_categories) * 100), margin={"t": 20, "b": 20, "l": 10}
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-    st.markdown("---")
-
-    # 5. Reporte de Validación de Fin de Ciclo (User Story 5.2)
-    st.subheader("Reporte de Validación Estructural")
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.markdown("#### **Auditoría de Déficits**")
-        if alerts:
-            st.error(
-                "Se han detectado varianzas negativas respecto a la línea base histórica. El modelo requiere ajustes."
-            )
-            for alert in alerts:
-                st.warning(
-                    f"**{alert['Categoria']}**: Exceso de $ {alert['Desviacion']:,.0f} ({alert['Porcentaje']:.1f}% del baseline)."
-                )
-        else:
-            st.success(
-                "Exito Operativo: Todas las categorías se mantienen dentro de la varianza histórica comprobada."
-            )
-
-    with col2:
-        st.markdown("#### **Recomendaciones Deterministas**")
-        if alerts:
-            st.markdown("""
-            **Acciones requeridas para el próximo ciclo:**
-            * Re-categorizar los gastos anómalos de las categorías en rojo.
-            * Si la varianza se debe a inflación o cambios estructurales reales, actualizar la asignación cero-basada en el módulo de presupuesto aceptando la nueva realidad.
-            * Reducir temporalmente la asignación a capital discrecional para compensar los déficits.
-            """)
-        else:
-            st.markdown("""
-            **Estado Óptimo:**
-            * La simulación se mantiene fiel a los datos crudos.
-            * El excedente de liquidez puede ser redirigido a las metas de acumulación de capital.
-            """)
-
+        with col2:
+            st.markdown("#### **Consejos para mejorar**")
+            if alertas:
+                st.markdown("""
+                * **Ajusta el freno:** Intenta recortar gastos en las categorías que están en rojo durante lo que queda del mes.
+                * **Próximo mes:** Si este gasto extra se va a volver normal (por ejemplo, subió el arriendo o los servicios), recuerda actualizar tu presupuesto mensual para reflejarlo.
+                """)
+            else:
+                st.markdown("""
+                * **Vas por excelente camino:** Como estás gastando menos de lo habitual, te sugerimos pasar ese dinero extra directamente a tus **Metas de Ahorro**.
+                """)
+    else:
+        st.info("Aún no tienes registrados movimientos clasificados como 'Gastos'.")
 else:
-    st.info(
-        "No hay datos transaccionales suficientes para ejecutar el análisis de varianza estructural."
-    )
+    st.info("💡 Para ver este análisis, primero necesitas registrar transacciones e historial en el sistema.")

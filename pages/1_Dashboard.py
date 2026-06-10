@@ -3,68 +3,86 @@ from datetime import datetime
 import plotly.graph_objects as go
 from database import insert_account, get_accounts_df
 
-st.set_page_config(page_title="Dashboard", layout="wide")
+# Configuración básica de la página
+st.set_page_config(page_title="Mi Resumen", layout="wide")
 
-st.title("Posición Financiera")
+st.title("Resumen de mis Cuentas")
 st.markdown(
-    "Auditoría operativa de tu liquidez. El patrimonio neto calculado aquí se deriva estrictamente de los saldos verificables ingresados, sin proyecciones ni asunciones teóricas."
+    "Aquí puedes ver el estado actual de tus cuentas y el dinero total que tienes disponible, calculado a partir de tus saldos reales."
 )
 
-tab1, tab2 = st.tabs(
-    ["Resumen de Liquidez (Net Worth)", "Establecer Baseline (Nueva Cuenta)"]
-)
+# Pestañas con nombres sencillos
+tab1, tab2 = st.tabs(["Mi Dinero Total", "Agregar Nueva Cuenta o Tarjeta"])
+
+# Diccionarios de traducción interna para mantener limpia la base de datos
+MAP_TIPO = {
+    "Dinero propio / Ahorros": "asset",
+    "Deudas / Tarjetas de crédito": "liability",
+}
+
+MAP_CATEGORIA = {
+    "Efectivo o cuenta de ahorros": "immediate_cash",
+    "CDT o fondos guardados": "locked_cd",
+    "Inversiones": "volatile_equities",
+    "Tarjeta de crédito": "revolving_credit",
+    "Préstamos / Créditos": "fixed_mortgage",
+}
+
+# Diccionario inverso para mostrar nombres amigables en la tabla
+MAP_CATEGORIA_INV = {v: k for k, v in MAP_CATEGORIA.items()}
 
 with tab2:
-    st.subheader("Registro de Productos Financieros")
+    st.subheader("Registrar una cuenta, tarjeta o préstamo")
     with st.form("account_form", clear_on_submit=True):
         col1, col2 = st.columns(2)
 
         with col1:
             name = st.text_input(
-                "Identificador de la Cuenta (Ej. Ahorros Nomina, TC Visa)"
+                "Nombre de la Cuenta (Ej. Cuenta de Nómina, Tarjeta Visa)"
             )
-            institution = st.text_input("Institución Financiera")
-            acc_type = st.selectbox(
-                "Clasificación Estructural",
-                ["asset", "liability"],  # Activos  # Pasivos / Deudas
-            )
+            institution = st.text_input("Banco o Entidad (Ej. Bancolombia)")
+            acc_type_esp = st.selectbox("Tipo de cuenta", list(MAP_TIPO.keys()))
 
         with col2:
-            liquidity_tier = st.selectbox(
-                "Nivel de Liquidez / Costo de Capital",
-                [
-                    "immediate_cash",  # Efectivo, cuentas de ahorro
-                    "locked_cd",  # CDTs, fiducias bloqueadas
-                    "volatile_equities",  # Acciones, cripto
-                    "revolving_credit",  # Tarjetas de crédito
-                    "fixed_mortgage",  # Créditos hipotecarios o de libre inversión
-                ],
+            liquidity_tier_esp = st.selectbox(
+                "¿Qué tipo de producto es?", list(MAP_CATEGORIA.keys())
             )
+            # Simplificación: El usuario ingresa el valor siempre en positivo
             balance = st.number_input(
-                "Saldo Actual (Usa números negativos para pasivos/deudas)",
+                "Saldo o deuda actual (Ingresa el valor en positivo)",
+                min_value=0.0,
                 step=50000.0,
             )
 
-        submitted = st.form_submit_button("Registrar en Base de Datos")
+        submitted = st.form_submit_button("Guardar en el Sistema")
 
-        if submitted:
+        if submitted and name:
+            tipo_interno = MAP_TIPO[acc_type_esp]
+            cat_interna = MAP_CATEGORIA[liquidity_tier_esp]
+
+            # Si es una deuda, lo convertimos a negativo internamente automáticamente
+            saldo_final = float(balance)
+            if tipo_interno == "liability" and saldo_final > 0:
+                saldo_final = -saldo_final
+
             account_data = {
                 "name": name,
                 "institution": institution,
-                "type": acc_type,
-                "liquidity_tier": liquidity_tier,
-                "balance": float(balance),
+                "type": tipo_interno,
+                "liquidity_tier": cat_interna,
+                "balance": saldo_final,
                 "currency": "COP",
                 "last_updated": datetime.utcnow(),
             }
             insert_account(account_data)
-            st.success(f"Producto '{name}' anclado al modelo con éxito.")
+            st.success(f"¡'{name}' se guardó correctamente!")
+            st.rerun()
 
 with tab1:
     df_accounts = get_accounts_df()
 
     if not df_accounts.empty:
-        # Filtramos estrictamente los datos observados en el dataset
+        # Separar el dinero a favor de las deudas
         df_assets = df_accounts[df_accounts["type"] == "asset"]
         df_liabilities = df_accounts[df_accounts["type"] == "liability"]
 
@@ -72,30 +90,29 @@ with tab1:
         total_liabilities = (
             df_liabilities["balance"].sum() if not df_liabilities.empty else 0
         )
-        net_worth = (
-            total_assets + total_liabilities
-        )  # Sumamos porque los pasivos entran en negativo
+        net_worth = total_assets + total_liabilities
 
-        # --- MÉTRICAS SUPERIORES ---
+        # --- TARJETAS DE MÉTRICAS SIMPLES ---
         col1, col2, col3 = st.columns(3)
-        col1.metric("Activos Verificados", f"$ {total_assets:,.0f}")
-        col2.metric("Pasivos Verificados", f"$ {total_liabilities:,.0f}")
-        col3.metric("Net Worth Empírico", f"$ {net_worth:,.0f}")
+        col1.metric("Mi Dinero Propio", f"$ {total_assets:,.0f}")
+        col2.metric(
+            "Mis Deudas Totales", f"$ {abs(total_liabilities):,.0f}"
+        )  # Mostramos en positivo para que sea más estético
+        col3.metric("Mi Dinero Real Total", f"$ {net_worth:,.0f}")
 
         st.markdown("---")
 
-        # --- VISUALIZACIÓN DE AUDITORÍA CON PLOTLY ---
         col_chart, col_table = st.columns([2, 1])
 
         with col_chart:
-            st.subheader("Distribución de Liquidez")
-            # Gráfico de cascada (Waterfall) para explicar cómo se llega al Net Worth
+            st.subheader("Cómo se distribuye mi dinero")
+
             fig = go.Figure(
                 go.Waterfall(
                     name="Patrimonio",
                     orientation="v",
                     measure=["relative"] * len(df_accounts) + ["total"],
-                    x=df_accounts["name"].tolist() + ["Net Worth Total"],
+                    x=df_accounts["name"].tolist() + ["Total Neto"],
                     textposition="outside",
                     text=[f"$ {b/1e6:.1f}M" for b in df_accounts["balance"]]
                     + [f"$ {net_worth/1e6:.1f}M"],
@@ -103,31 +120,39 @@ with tab1:
                     connector={"line": {"color": "rgb(63, 63, 63)"}},
                     increasing={
                         "marker": {"color": "#2ca02c"}
-                    },  # Verde para activos
-                    decreasing={
-                        "marker": {"color": "#d62728"}
-                    },  # Rojo para pasivos
-                    totals={"marker": {"color": "#1f77b4"}},  # Azul para el total
+                    },  # Verde para dinero a favor
+                    decreasing={"marker": {"color": "#d62728"}},  # Rojo para deudas
+                    totals={
+                        "marker": {"color": "#1f77b4"}
+                    },  # Azul para el resultado final
                 )
             )
             fig.update_layout(margin=dict(t=30, l=10, r=10, b=10), waterfallgap=0.3)
             st.plotly_chart(fig, use_container_width=True)
 
         with col_table:
-            st.subheader("Desglose del Dataset")
+            st.subheader("Lista de mis Cuentas")
+
+            # Preparamos los datos para mostrarlos de forma sencilla
             df_display = df_accounts[["name", "liquidity_tier", "balance"]].copy()
+            # Traducimos los términos de la base de datos al español para el usuario
+            df_display["liquidity_tier"] = df_display["liquidity_tier"].map(
+                MAP_CATEGORIA_INV
+            )
+
             st.dataframe(
                 df_display,
                 hide_index=True,
+                use_container_width=True,
                 column_config={
-                    "name": "Producto",
-                    "liquidity_tier": "Nivel de Liquidez",
+                    "name": "Cuenta / Tarjeta",
+                    "liquidity_tier": "Tipo de Producto",
                     "balance": st.column_config.NumberColumn(
-                        "Saldo", format="$ %d"
+                        "Saldo Actual", format="$ %d"
                     ),
                 },
             )
     else:
         st.info(
-            "El dataset de liquidez está vacío. Ve a la pestaña 'Establecer Baseline' para registrar tus productos financieros."
+            "Aún no has agregado ninguna cuenta. Ve a la pestaña 'Agregar Nueva Cuenta o Tarjeta' para empezar."
         )
