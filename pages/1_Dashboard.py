@@ -128,7 +128,7 @@ with tab1:
                 )
             )
             fig.update_layout(margin=dict(t=30, l=10, r=10, b=10), waterfallgap=0.3)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
         with col_table:
             st.subheader("Lista de mis Cuentas")
@@ -143,7 +143,7 @@ with tab1:
             st.dataframe(
                 df_display,
                 hide_index=True,
-                use_container_width=True,
+                width="stretch",
                 column_config={
                     "name": "Cuenta / Tarjeta",
                     "liquidity_tier": "Tipo de Producto",

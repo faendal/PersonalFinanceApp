@@ -111,7 +111,7 @@ with tab2:
 
         st.dataframe(
             df_display,
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
             column_config={
                 "date": st.column_config.DatetimeColumn("Fecha", format="YYYY-MM-DD"),
