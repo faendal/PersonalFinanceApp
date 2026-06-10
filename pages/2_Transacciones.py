@@ -1,6 +1,6 @@
 import streamlit as st
 from datetime import datetime
-from ..database import insert_transaction, get_transactions_df, get_categories_dict
+from database import insert_transaction, get_transactions_df, get_categories_dict
 
 # Configuración básica de la página
 st.set_page_config(page_title="Transacciones", layout="wide")
