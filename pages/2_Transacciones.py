@@ -81,8 +81,6 @@ with tab1:
                     "account_name": account_selected,
                     "category": category,
                     "subcategory": subcategory,
-                    "counterparty": counterparty,
-                    "description": description,
                 }
 
                 # Guardar el registro y modificar el saldo de la cuenta en una sola operación
