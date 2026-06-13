@@ -46,9 +46,6 @@ with tab1:
             account_selected = st.selectbox(
                 "¿Con qué cuenta o tarjeta se pagó/recibió?", lista_cuentas
             )
-            counterparty = st.text_input(
-                "¿Dónde o con quién? (Ej. Supermercado, Almacén, Empresa)"
-            )
 
         with col2:
             # Al cambiar la categoría, Streamlit recargará automáticamente el menú inferior
@@ -62,7 +59,6 @@ with tab1:
             else:
                 subcategory = st.text_input("Subcategoría (Escribe una nueva opción)")
 
-            description = st.text_input("Notas o descripción corta (Opcional)")
 
         # Botón de guardado común
         submitted = st.button("Guardar Movimiento")
@@ -111,8 +107,6 @@ with tab2:
             "amount",
             "category",
             "subcategory",
-            "counterparty",
-            "description",
         ]
         # Filtrar solo las columnas que realmente existan en la base de datos para prevenir errores
         columnas_presentes = [col for col in columnas_validas if col in df.columns]
@@ -130,8 +124,6 @@ with tab2:
                 "amount": st.column_config.NumberColumn("Monto", format="$ %d"),
                 "category": "Categoría",
                 "subcategory": "Subcategoría",
-                "counterparty": "¿Dónde o con quién?",
-                "description": "Notas",
             },
         )
     else:
