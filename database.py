@@ -52,6 +52,24 @@ def insert_category(category_name):
     )
 
 
+def insert_transaction_and_update_balance(
+    transaction_data, account_name, balance_change
+):
+    """
+    Guarda la transacción en la base de datos y actualiza automáticamente
+    el saldo de la cuenta vinculada sumando o restando el monto.
+    """
+    db = get_database()
+
+    # 1. Guardar la transacción
+    db.transactions.insert_one(transaction_data)
+
+    # 2. Modificar el saldo de la cuenta de forma automática
+    db.accounts.update_one(
+        {"name": account_name}, {"$inc": {"balance": balance_change}}
+    )
+
+
 def add_subcategory(category_name, subcategory_name):
     """Añade una subcategoría a una categoría que ya existe."""
     db = get_database()

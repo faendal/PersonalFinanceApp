@@ -1,47 +1,62 @@
 import streamlit as st
 from datetime import datetime
-from database import insert_transaction, get_transactions_df, get_categories_dict
+from database import (
+    get_transactions_df,
+    get_categories_dict,
+    get_accounts_df,
+    insert_transaction_and_update_balance,
+)
 
 # Configuración básica de la página
 st.set_page_config(page_title="Transacciones", layout="wide")
 
 st.title("Historial y Registro de Movimientos")
 st.markdown(
-    "Registra tus ingresos, gastos o transferencias diarias de forma sencilla para mantener al día tus cuentas."
+    "Registra tus movimientos diarios y mantén actualizados los saldos de tus cuentas de forma automática."
 )
 
-# Pestañas en español y fáciles de entender
+# Pestañas para organizar la vista
 tab1, tab2 = st.tabs(["Registrar Movimiento", "Ver Todo mi Historial"])
 
-# Traemos las categorías y subcategorías actuales de la base de datos
+# 1. Traer categorías y cuentas de la base de datos
 cat_dict = get_categories_dict()
 lista_categorias = list(cat_dict.keys())
+
+df_accounts = get_accounts_df()
+lista_cuentas = df_accounts["name"].tolist() if not df_accounts.empty else []
 
 with tab1:
     st.subheader("Ingresar nuevo movimiento")
 
-    # Usamos un formulario para agrupar los datos antes de enviar
-    with st.form("transaction_form", clear_on_submit=True):
+    if not lista_cuentas:
+        st.warning(
+            "Primero debes registrar al menos una cuenta o tarjeta en la sección 'Mi Resumen' para poder asociar tus movimientos."
+        )
+    elif not lista_categorias:
+        st.warning(
+            "No se encontraron categorías configuradas. Ve a la sección de Categorías para crear una."
+        )
+    else:
+        # Diseñamos las columnas sin st.form para permitir que los desplegables sean dinámicos
         col1, col2 = st.columns(2)
 
         with col1:
             date = st.date_input("¿Cuándo fue?", datetime.today())
             amount = st.number_input("¿Cuánto fue? ($)", min_value=0.0, step=1000.0)
-            trans_type = st.selectbox(
-                "Tipo de movimiento", ["Gasto", "Ingreso", "Transferencia"]
+            account_selected = st.selectbox(
+                "¿Con qué cuenta o tarjeta se pagó/recibió?", lista_cuentas
             )
             counterparty = st.text_input(
                 "¿Dónde o con quién? (Ej. Supermercado, Almacén, Empresa)"
             )
 
         with col2:
-            # Lista desplegable en español para la categoría principal
+            # Al cambiar la categoría, Streamlit recargará automáticamente el menú inferior
             category = st.selectbox("Categoría", lista_categorias)
 
-            # Buscamos las subcategorías asociadas a la categoría elegida
+            # Buscamos las subcategorías que pertenecen ÚNICAMENTE a la categoría seleccionada
             subcategorias_disponibles = cat_dict.get(category, [])
 
-            # Si la categoría tiene subcategorías, las mostramos en un desplegable
             if subcategorias_disponibles:
                 subcategory = st.selectbox("Subcategoría", subcategorias_disponibles)
             else:
@@ -49,73 +64,69 @@ with tab1:
 
             description = st.text_input("Notas o descripción corta (Opcional)")
 
-        submitted = st.form_submit_button("Guardar Movimiento")
+        # Botón de guardado común
+        submitted = st.button("Guardar Movimiento")
 
-        if submitted and amount > 0:
-            # Traducimos internamente para mantener consistencia en la base de datos
-            tipo_interno = (
-                "expense"
-                if trans_type == "Gasto"
-                else "income" if trans_type == "Ingreso" else "transfer"
-            )
+        if submitted:
+            if amount <= 0:
+                st.error("El monto debe ser mayor a $ 0.")
+            else:
+                # LÓGICA DE ACTUALIZACIÓN AUTOMÁTICA:
+                # Si la categoría es 'Ingresos' el dinero suma en la cuenta; de lo contrario, resta.
+                cambio_saldo = (
+                    float(amount) if category == "Ingresos" else -float(amount)
+                )
 
-            # Convertimos la fecha al formato correcto para MongoDB
-            dt = datetime.combine(date, datetime.min.time())
+                # Preparar el documento para la base de datos (sin el campo innecesario 'type')
+                dt = datetime.combine(date, datetime.min.time())
+                transaction_data = {
+                    "date": dt,
+                    "amount": float(amount),
+                    "account_name": account_selected,
+                    "category": category,
+                    "subcategory": subcategory,
+                    "counterparty": counterparty,
+                    "description": description,
+                }
 
-            transaction_data = {
-                "date": dt,
-                "amount": float(amount),
-                "type": tipo_interno,
-                "account_origin_id": None,
-                "account_destination_id": None,
-                "category": category,
-                "subcategory": subcategory,
-                "counterparty": counterparty,
-                "description": description,
-                "is_reviewed": True,
-            }
+                # Guardar el registro y modificar el saldo de la cuenta en una sola operación
+                insert_transaction_and_update_balance(
+                    transaction_data, account_selected, cambio_saldo
+                )
 
-            # Guardamos en MongoDB Atlas
-            insert_transaction(transaction_data)
-            st.success("¡El movimiento se guardó correctamente!")
-            st.rerun()
+                st.success(
+                    f"¡Movimiento guardado! El saldo de '{account_selected}' se ha actualizado."
+                )
+                st.rerun()
 
 with tab2:
     st.subheader("Lista de movimientos registrados")
     df = get_transactions_df()
 
-    if not df.empty:
-        # Mapeo inverso para mostrar tipos amigables en la tabla
-        map_tipo_inv = {
-            "expense": "Gasto",
-            "income": "Ingreso",
-            "transfer": "Transferencia",
-        }
+    if not df.empty and "category" in df.columns:
+        # Preparamos las columnas limpias y legibles para mostrar al usuario
+        columnas_validas = [
+            "date",
+            "account_name",
+            "amount",
+            "category",
+            "subcategory",
+            "counterparty",
+            "description",
+        ]
+        # Filtrar solo las columnas que realmente existan en la base de datos para prevenir errores
+        columnas_presentes = [col for col in columnas_validas if col in df.columns]
 
-        # Copiamos y preparamos las columnas necesarias para el usuario
-        df_display = df[
-            [
-                "date",
-                "type",
-                "amount",
-                "category",
-                "subcategory",
-                "counterparty",
-                "description",
-            ]
-        ].copy()
-        df_display["type"] = df_display["type"].map(map_tipo_inv)
-
-        # Ordenamos cronológicamente para ver lo más nuevo arriba
+        df_display = df[columnas_presentes].copy()
         df_display = df_display.sort_values(by="date", ascending=False)
 
         st.dataframe(
             df_display,
-            width="stretch",
+            use_container_width=True,
             hide_index=True,
             column_config={
                 "date": st.column_config.DatetimeColumn("Fecha", format="YYYY-MM-DD"),
-                "type": "Tipo",
+                "account_name": "Cuenta / Tarjeta",
                 "amount": st.column_config.NumberColumn("Monto", format="$ %d"),
                 "category": "Categoría",
                 "subcategory": "Subcategoría",
